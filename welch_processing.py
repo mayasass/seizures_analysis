@@ -22,7 +22,7 @@ def fix_electrode_names(raw):
     # Define the standard 19 electrodes template
     standard_electrodes = {'FP1', 'FP2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4',
                            'O1', 'O2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8',
-                           'Fz', 'Cz', 'Pz'}
+                           'FZ', 'CZ', 'PZ'}
 
     # Define the channel name mapping for old to new names
     channel_mapping = {
