@@ -10,7 +10,7 @@ def fix_electrode_names(raw):
     """
     Rename old electrode names to new standard and keep only the 19 standard electrodes.
 
-    Args:
+    Arguments:
         raw (mne.io.Raw): Raw EEG data
 
     Returns:
@@ -63,7 +63,7 @@ def fix_electrode_names(raw):
 
 def preprocess_eeg(raw):
     """
-    Preprocess EEG data with standard pipeline.
+    Preprocess EEG data with standard pipeline (bandpass and avg reference).
 
     Args:
         raw (mne.io.Raw): Raw EEG data
@@ -160,7 +160,7 @@ def analyze_delta_power(raw):
     df_results = compute_power_spectrum(raw_processed)
 
     # 3. Save results
-    output_path = 'exel_files/delta_power_analysis.csv'
+    output_path = '/Users/maya/Documents/backup_lab_project/exel_files/delta_power_analysis.csv'
     df_results.to_csv(output_path, index=False)
     print(f"Analysis complete. Results saved to {output_path}")
 
@@ -171,7 +171,7 @@ def analyze_delta_power(raw):
 if __name__ == "__main__":
     try:
         # Load your EEG data
-        raw = mne.io.read_raw_nicolet('data/100102_0075.data', ch_type='eeg', preload=True)
+        raw = mne.io.read_raw_nicolet('/Users/maya/Documents/backup_lab_project/data/100102_0075.data', ch_type='eeg', preload=True)
 
         # Run the analysis
         results = analyze_delta_power(raw)
