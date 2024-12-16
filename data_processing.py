@@ -5,72 +5,30 @@ import matplotlib as mpl
 from matplotlib import pyplot as plt
 mpl.use('QtAgg')
 from datetime import datetime, timedelta
-
-def plot_seizure(cropped_raw):
-    fig = cropped_raw.plot(
-        scalings='auto',
-        title=('EEG Data Around The Seizure'),
-        block=True)  # Added block=True
-    plt.show(block=True)
-
-def cut_seizure(raw, onset, offset, pre_window_sec: int = 60, post_window_sec: int = 60):
-    recording_start = np.datetime64(raw.info['meas_date'])
-    print(recording_start)
-    """""
-        seizure_start = np.datetime64(seizures_data.loc[i,'onset'])
-        seizure_end = np.datetime64(seizures_data.loc[i, 'offset'])
-    """""
-    # 1) Dividing to get duration in sec
-    seizure_start_from_tmin = (onset - recording_start) / np.timedelta64(1, 's')
-    seizure_end_from_tmin = (offset - recording_start) / np.timedelta64(1, 's')
-
-    # 2) Calculate crop times in sec
-    crop_start = seizure_start_from_tmin - pre_window_sec
-    crop_end = seizure_end_from_tmin + post_window_sec
-    print('c(srop length ec) for seizure is: ', (crop_end-crop_start))
-
-    # 3) Make sure we're not overflowing
-    if crop_start < 0:
-        crop_start = 0
-    print('crop start time', crop_start)
-
-    # 4) Cropping the data
-    cropped_raw = raw.copy().crop(tmin=crop_start, tmax=crop_end)
-    # Maybe: raising assert for data exception
-
-    return cropped_raw
+from pathlib import Path
 
 """""
-NOT SURE HOW TO GET DATA PATH
+fix_electrode_names(raw)
 
-# 1) Loading data to a data frame
-seizures_data = pd.read_csv('data/1_surf30_seizures.csv') # waiting for path
-data_df = pd.read_csv('data/pat_1_surf30_file_list.csv') # waiting for path
+Rename old electrode names to new standard and keep only the 19 standard electrodes.
 
-# 2) Load EEG file (using MNE nicolet reader) and get the total recording start time
-path = 'data/' + patient_id + '.data'
-raw = mne.io.read_raw_nicolet(path, ch_type='eeg', preload=True)
-recording_start = np.datetime64(raw.info['meas_date'])
+Arguments:
+raw (mne.io.Raw): Raw EEG data
 
-
-seizures_data = pd.read_csv('data/1_surf30_seizures.csv')  # waiting for path
-data_df = pd.read_csv('data/pat_1_surf30_file_list.csv')  # waiting for path
-path = 'data/' + patient_id + '.data'
-raw = mne.io.read_raw_nicolet(path, ch_type='eeg', preload=True)
+Returns:
+mne.io.Raw: Processed EEG data with correct electrode names
 """""
 
-def analyze_delta_power(cropped_raw):
-    """
-    Preprocess EEG data and analyze delta power for each channel.
-
-    Args:
-        cropped_raw: MNE Raw object containing the cropped EEG data
-    """
-    # 1) Preprocessing
+def fix_electrode_names(raw):
     # Create a copy to avoid modifying the original
-    raw_processed = cropped_raw.copy()
+    raw_processed = raw.copy()
 
-    # Define the channel name mapping in a dictionary
+    # Define the standard 19 electrodes template
+    standard_electrodes = {'FP1', 'FP2', 'F3', 'F4', 'C3', 'C4', 'P3', 'P4',
+                           'O1', 'O2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8',
+                           'FZ', 'CZ', 'PZ'}
+
+    # Define the channel name mapping for old to new names
     channel_mapping = {
         'T3': 'T7',
         'T4': 'T8',
@@ -87,72 +45,90 @@ def analyze_delta_power(cropped_raw):
             channels_to_rename[old_name] = new_name
             print(f"Renaming channel {old_name} to {new_name}")
 
-    # Rename channels if any need to be renamed
-    if channels_to_rename: # if the dictionary is not empty
-        # Use MNE's function to rename the channels:
-        # keys are the old channel names
-        # values are the new channel names
+    if channels_to_rename:
         raw_processed.rename_channels(channels_to_rename)
+
+    # Get current channels after renaming
+    current_channels = raw_processed.ch_names
+
+    # Find channels to drop (those not in standard_electrodes)
+    channels_to_drop = [ch for ch in current_channels if ch not in standard_electrodes]
+
+    if channels_to_drop:
+        print(f"Dropping non-standard channels: {channels_to_drop}")
+        raw_processed.drop_channels(channels_to_drop)
+
+    # Verify final channel set
+    final_channels = raw_processed.ch_names
+    print(f"Final channels ({len(final_channels)}): {final_channels}")
+
+    return raw_processed
+
+"""""
+    preprocess_eeg(raw)
+    Preprocess EEG data with standard pipeline (bandpass and avg reference).
+    Args: raw (mne.io.Raw): Raw EEG data
+    Returns: mne.io.Raw: Preprocessed EEG data
+"""""
+def preprocess_eeg(raw):
+    # Create a copy to avoid modifying the original
+    raw_processed = raw.copy()
+
+    # Fix electrode names and keep only standard ones
+    raw_processed = fix_electrode_names(raw_processed)
 
     # Apply bandpass filter (0.5-40 Hz)
     raw_processed.filter(l_freq=0.5, h_freq=40)
+    print("Applied bandpass filter (0.5-40 Hz)")
 
     # Set average reference
     raw_processed.set_eeg_reference(ref_channels='average')
+    print("Applied average reference")
 
-    # 2) Power Analysis
+    return raw_processed
+
+"""""
+compute_power_spectrum(raw_processed)
+
+Compute power spectrum and analyzed frequency bands for each channel.
+
+Args:
+    raw_processed (mne.io.Raw): Preprocessed EEG data
+
+Returns:
+    pd.DataFrame: Results containing power values for different frequency bands
+"""""
+
+
+def compute_power_spectrum(raw_processed):
     # Get channel names
     channels = raw_processed.ch_names
 
     # Initialize lists to store results
     results = []
 
+    # Helper function to get power in specific frequency range
+    def get_freq_power(psds, freqs, fmin, fmax):
+        idx = np.logical_and(freqs >= fmin, freqs <= fmax)
+        return np.mean(psds[:, idx])
+
     # Calculate power spectrum for each channel
     for channel in channels:
-        # Extract data for this channel
-        data, times = raw_processed[channel]
-
-        # Calculate power spectrum using Welch's method
-        # psds = power spectral density values
-        psds, freqs = raw_processed.compute_psd(
+        # Get the spectrum object
+        spectrum = raw_processed.compute_psd(
             method='welch',
             picks=channel,
             fmin=0.5,
             fmax=40,
             n_fft=int(raw_processed.info['sfreq'] * 4),
             n_overlap=int(raw_processed.info['sfreq'] * 2)
-            ).get_data(return_freqs=True)
+        )
 
-        # Use it in your analysis loop:
-        for channel in channels:
-            psds, freqs = raw_processed.compute_psd(
-            method='welch',
-            picks=channel,
-            fmin=0.5,
-            fmax=40,
-            n_fft=int(raw_processed.info['sfreq'] * 4),
-            n_overlap=int(raw_processed.info['sfreq'] * 2)
-            )
-            plot_psd(psds, freqs, channel)
+        # Get the data from spectrum
+        psds = spectrum.get_data()
+        freqs = spectrum.freqs
 
-        psds, freqs = raw_processed.compute_spectrum(
-            psds, freqs=raw_processed.compute_psd(
-                method='welch',
-                picks=channel,
-                fmin=0.5,
-                fmax=40,
-                n_fft=int(raw_processed.info['sfreq'] * 4),
-                n_overlap=int(raw_processed.info['sfreq'] * 2)
-        ).get_data(return_freqs=True))
-        inspect_spectrum(psds, freqs)
-
-        # Calculate power in specific bands
-        # Helper function to get power in specific frequency range
-        def get_freq_power(psds, freqs, fmin, fmax):
-            idx = np.logical_and(freqs >= fmin, freqs <= fmax)
-            return np.mean(psds[:, idx], axis=1)[0]
-
-        # Calculate powers
+        # Calculate powers for different frequency bands
         delta_power_0p5_2 = get_freq_power(psds, freqs, 0.5, 2)
         delta_power_1_4 = get_freq_power(psds, freqs, 1, 4)
         total_power = get_freq_power(psds, freqs, 0.5, 40)
@@ -167,68 +143,151 @@ def analyze_delta_power(cropped_raw):
 
     # Create DataFrame from results
     df_results = pd.DataFrame(results)
+    return df_results
 
-    # Save to CSV
-    output_path = 'EEGTableAnalysis/delta_power_analysis.csv'
+
+"""""
+analyze_delta_power(raw)
+
+Main function to analyze delta power in EEG data.
+
+Args:
+    raw (mne.io.Raw): Raw EEG data
+
+Returns:
+    pd.DataFrame: Results of power analysis
+"""""
+
+
+def analyze_delta_power(raw):
+    # 1. Preprocess the data
+    raw_processed = preprocess_eeg(raw)
+
+    # 2. Compute power spectrum and analyze
+    df_results = compute_power_spectrum(raw_processed)
+
+    # 3. Save results
+    output_path = 'D:/seizures_analysis/excel_files'
     df_results.to_csv(output_path, index=False)
-
     print(f"Analysis complete. Results saved to {output_path}")
 
     return df_results
 
 """""
-code visualization
+analyze_delta_power(raw)
+
+Main function to analyze delta power in EEG data.
+
+Args:
+    raw (mne.io.Raw): Raw EEG data
+
+Returns:
+    pd.DataFrame: Results of power analysis
 """""
-def plot_psd(psds, freqs, channel_name):
-    plt.figure(figsize=(10, 6))
-    plt.semilogy(freqs, psds[0])  # Log scale for better visualization
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Power Spectral Density (µV²/Hz)')
-    plt.title(f'PSD for channel {channel_name}')
-    plt.grid(True)
-    plt.axvspan(0.5, 2, color='red', alpha=0.3, label='Delta 0.5-2 Hz')
-    plt.axvspan(1, 4, color='blue', alpha=0.3, label='Delta 1-4 Hz')
-    plt.legend()
-    plt.show()
 
 
-# Add this to your code to see what the data looks like
-def inspect_spectrum(psds, freqs):
-    print("First few frequencies (Hz):", freqs[:5])
-    print("First few power values:", psds[0][:5])
+def analyze_delta_power(raw):
+    # 1. Preprocess the data
+    raw_processed = preprocess_eeg(raw)
 
-    # Optional: Plot the spectrum
-    plt.figure(figsize=(10, 5))
-    plt.plot(freqs, psds[0])
-    plt.xlabel('Frequency (Hz)')
-    plt.ylabel('Power')
-    plt.title(f'Spectrum for channel')
-    plt.show()
+    # 2. Compute power spectrum and analyze
+    df_results = compute_power_spectrum(raw_processed)
+
+    # 3. Save results
+    output_path = 'D:/seizures_analysis/excel_files'
+    df_results.to_csv(output_path, index=False)
+    print(f"Analysis complete. Results saved to {output_path}")
+
+    return df_results
+"""""
+seizure_num_to_raw_data(pat_num,seizure_num)
+
+Finding paths to data.
+
+Args:
+    Patient id and one seizure number of his
+
+Returns:
+    Raw EEG data and path to the specific patient list of seizures
+"""""
+
+
+def seizure_num_to_raw_data(pat_index, seizure_index):
+    pat_num = str(pat_index)
+
+    data_path = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
+    seizures_list_path = data_path / "tables" / "seizure_tables" / f"{pat_num}_surf30_seizures"
+    seizures_list_table = pd.read_excel(seizures_list_path)
+    seizures_data_path = data_path / "tables" / f"pat_{pat_num}_surf30_file_list"
+    seizure_rec_num = \
+    seizures_list_table.loc[seizures_list_table['seizure_num'] == seizure_index, 'file_seizure_ind'].iloc[0]
+
+    seizures_data_table = pd.read_excel(seizures_data_path)
+    seizure_recording_path = seizures_data_table.loc[(seizure_rec_num + 2), 'file_path']
+    raw = mne.io.read_raw_nicolet(seizure_recording_path)
+
+    return raw, seizures_list_path
+
+"""""
+copy_and_crop(raw,seizures_list_path,seizure_ind,sec_before = 60, sec_after = 60):
+
+Finding paths to data.
+
+Args:
+    Raw data of recording with a seizure in it, list of seizures' info, seizure index 
+
+Returns:
+    Raw EEG data crop of the seizure's time +- sec variant (default 60)
+"""""
+
+
+def copy_and_crop(raw, seizures_list_path, seizure_ind, sec_before=60, sec_after=60):
+    # Create a copy to avoid modifying the original
+    raw = raw.copy()
+    seizures_data = pd.read_csv(seizures_list_path)
+
+    # Get recording information in seconds
+    recording_duration = raw.times[-1]  # or: len(raw.times) / raw.info['sfreq']
+    recording_start = np.datetime64(raw.info['meas_date'])
+
+    # Get the start & end time of desired seizure
+    seizure_start = pd.to_datetime(seizures_data.loc[seizure_ind, 'onset'], format='%d/%m/%Y %H:%M').to_numpy()
+    seizure_end = pd.to_datetime(seizures_data.loc[seizure_ind, 'offset'], format='%d/%m/%Y %H:%M').to_numpy()
+
+    # Subtraction of start and end from recording start to get duration in sec
+    seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
+    seizure_end_from_tmin = (seizure_end - recording_start) / np.timedelta64(1, 's')
+
+    # Calculate crop times in sec (5 minutes before and after (60s))
+    crop_start = seizure_start_from_tmin - sec_before
+    crop_end = seizure_end_from_tmin + sec_after
+    print(crop_start)
+    print(crop_end)
+
+    # Make sure we're within recording borders
+    if crop_start < 0:
+        crop_start = 0
+        print('Warning: crop_start adjusted to recording start (0)')
+
+    if crop_end > recording_duration:
+        crop_end = recording_duration
+        print(f'Warning: crop_end adjusted to recording end ({recording_duration}s)')
+
+    # Cropping the data
+    raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
+    # Maybe: raising assert for data exception
 
 def main():
-    # Example usage
-    try:
-        # Get your raw EEG data and seizure times
-        raw = mne.io.read_raw_nicolet('data/100102_0075.data', ch_type='eeg', preload=True)
-        seizures_data = pd.read_csv('data/1_surf30_seizures.csv')
-        onset = np.datetime64(seizures_data.loc[0, 'onset'])  # example
-        offset = np.datetime64(seizures_data.loc[0, 'offset'])  # example
+    if __name__ == "__main__":
+        try:
+            # Load your EEG data
+            raw = mne.io.read_raw_nicolet('/Users/maya/Documents/backup_lab_project/data/100102_0075.data',
+                                          ch_type='eeg', preload=True)
 
-        # Cut the seizure
-        cropped_raw = cut_seizure(raw, onset, offset)
+            # Run the analysis
+            results = analyze_delta_power(raw)
+            print("\nFinal Results:")
+            print(results)
 
-        # Optional: Plot the cropped data
-        #plot_seizure(cropped_raw)
-
-        # Analyze delta power
-        power_results = analyze_delta_power(cropped_raw)
-
-        print("Power analysis results:")
-        print(power_results)
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-
-
-if __name__ == "__main__":
-    main()
+        except Exception as e:
+            print(f"An error occurred: {e}")
