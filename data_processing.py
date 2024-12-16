@@ -194,11 +194,21 @@ def analyze_delta_power(raw):
     df_results = compute_power_spectrum(raw_processed)
 
     # 3. Save results
-    output_path = 'D:/seizures_analysis/excel_files'
+    output_path = 'C:/Users/cognitive'
     df_results.to_csv(output_path, index=False)
     print(f"Analysis complete. Results saved to {output_path}")
 
+    # Create a DataFrame from the summary list
+    delta_power_analysis_df = pd.DataFrame(df_results)
+
+    # Print the summary DataFrame
+    print(delta_power_analysis_df)
+
+    # Save to Excel file
+    delta_power_analysis_df.to_excel('delta_power_analysis_df.xlsx', index=False)
+
     return df_results
+
 """""
 seizure_num_to_raw_data(pat_num,seizure_num)
 
@@ -276,8 +286,9 @@ def copy_and_crop(raw, seizures_list_path, seizure_ind, sec_before=60, sec_after
     # Cropping the data
     raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
     # Maybe: raising assert for data exception
+    return raw_cropped
 
-def main():
+def main_analysis(pat_num, seizure_index):
     def main(pat_num, seizure_index):
         # Step 1: Find the raw EEG data for the given patient and seizure index
         raw_data, seizures_list_path = seizure_num_to_raw_data(pat_num, seizure_index)
