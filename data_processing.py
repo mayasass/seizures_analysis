@@ -278,16 +278,23 @@ def copy_and_crop(raw, seizures_list_path, seizure_ind, sec_before=60, sec_after
     # Maybe: raising assert for data exception
 
 def main():
+    def main(pat_num, seizure_index):
+        # Step 1: Find the raw EEG data for the given patient and seizure index
+        raw_data, seizures_list_path = seizure_num_to_raw_data(pat_num, seizure_index)
+
+        # Step 2: Crop the raw data around the seizure, with 60 seconds before and after the event
+        raw_cropped = copy_and_crop(raw_data, seizures_list_path, seizure_index)
+
+        # Step 3: Analyze the cropped data for delta power
+        analysis_results = analyze_delta_power(raw_cropped)
+
+        # Step 4: Return the analysis results (or save them, depending on requirements)
+        return analysis_results
+
+    # Example usage
     if __name__ == "__main__":
-        try:
-            # Load your EEG data
-            raw = mne.io.read_raw_nicolet('/Users/maya/Documents/backup_lab_project/data/100102_0075.data',
-                                          ch_type='eeg', preload=True)
+        patient_number = 1  # Example patient number
+        seizure_index = 1  # Example seizure index
+        results = main(patient_number, seizure_index)
+        print(results)
 
-            # Run the analysis
-            results = analyze_delta_power(raw)
-            print("\nFinal Results:")
-            print(results)
-
-        except Exception as e:
-            print(f"An error occurred: {e}")
