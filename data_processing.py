@@ -1,3 +1,5 @@
+import os
+
 import pandas as pd
 import numpy as np
 import mne
@@ -7,7 +9,7 @@ mpl.use('QtAgg')
 from datetime import datetime, timedelta
 from pathlib import Path
 
-
+DATA_PATH = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
 
 def fix_electrode_names(raw):
     """""
@@ -167,7 +169,7 @@ def analyze_delta_power(raw):
 
     return df_results
 
-def seizure_num_to_raw_data(pat_num, seizure_index,seizures_list_table):
+def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     """""
     Finds the compatible recording for seizure.
     
@@ -186,15 +188,34 @@ def seizure_num_to_raw_data(pat_num, seizure_index,seizures_list_table):
         'file_seizure_ind'].iloc[0]
 
     # Load the recordings data table
-    seizures_data_path = data_path / "tables" / f"pat_{pat_num}_surf30_file_list"
-    seizures_data_table = pd.read_excel(seizures_data_path)
+    seizures_data_path = data_path / "tables" / "pat_file_tables" / f"pat_{pat_num}_surf30_file_list.csv"
+    seizures_data_table = pd.read_csv(seizures_data_path)
 
-    #*********** NOT SURE ****************
     # Get the recording path
     seizure_recording_path = seizures_data_table.loc[seizure_rec_num, 'file_path']
 
+    # Get the recording path as string and replace 'head' with 'data'
+    file_path = seizures_data_table.loc[seizure_rec_num, 'file_path']
+    file_path = file_path.replace('head', 'data')  # String replacement
+
+    # Ensure the path ends with .data
+    if not file_path.endswith('.data'):
+        file_path += '.data'
+
+    # Find the position of the substring "raw_data"
+    substring = "raw_data"
+    index = file_path.find(substring)
+    # If the substring is found, cut the path from "raw_data" onwards
+    if index != -1:
+        subpath = file_path[index:]
+    else:
+        print("Substring not found in path")
+        return None
+
+    seizure_recording_path = data_path / subpath
+
     # Read the raw data
-    raw = mne.io.read_raw_nicolet(seizure_recording_path)
+    raw = mne.io.read_raw_nicolet(seizure_recording_path, ch_type='eeg', preload=True)
 
     return raw
 
@@ -211,13 +232,20 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
     # Create a copy to avoid modifying the original
     raw = raw.copy()
 
+    # Adjusting to original counting method
+    seizure_ind = seizure_ind - 1
     # Get recording information in seconds
     recording_duration = raw.times[-1]  # or: len(raw.times) / raw.info['sfreq']
     recording_start = np.datetime64(raw.info['meas_date'])
 
     # Get the start & end time of desired seizure
-    seizure_start = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'onset'], format='%d/%m/%Y %H:%M').to_numpy()
-    seizure_end = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'offset'], format='%d/%m/%Y %H:%M').to_numpy()
+    seizure_start = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'onset'], format='ISO8601').to_numpy()
+    seizure_end = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'offset'], format='ISO8601').to_numpy()
+
+    # Ensure both datetime64 values have the same precision (microseconds here)
+    recording_start = recording_start.astype('datetime64[us]')
+    seizure_start = seizure_start.astype('datetime64[us]')
+    seizure_end = seizure_end.astype('datetime64[us]')
 
     # Subtraction of start and end from recording start to get duration in sec
     seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
@@ -243,38 +271,41 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
     # Maybe: raising assert for data exception
     return raw_cropped
 
-def get_seizures_list(pat_num):
-    # Base path to data
-    data_path = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
-
+def get_seizures_list(pat_num, data_path=DATA_PATH):
     # Load seizures table
-    seizures_list_path = data_path / "tables" / "seizure_tables" / f"{pat_num}_surf30_seizures"
-    seizures_list_table = pd.read_excel(seizures_list_path)
+    seizures_list_path = data_path / "tables" / "seizure_tables" / f"{pat_num}_surf30_seizures.csv"
+    seizures_list_table = pd.read_csv(seizures_list_path)
 
     return seizures_list_table
 
-def main_analysis(pat_num, seizure_index):
-    def main(pat_num, seizure_index, seizures_list_table):
-        # Step 1: Find the raw EEG data for the given patient and seizure index
-        raw_data = seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table)
+def main_analysis(pat_num, seizure_index, seizures_list_table, data_path = DATA_PATH):
 
-        # Step 2: Crop the raw data around the seizure, with 60 seconds before and after the event
-        raw_cropped = copy_and_crop(raw_data, seizure_index, seizures_list_table)
+    # Step 1: Find the raw EEG data for the given patient and seizure index
+    raw_data = seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table)
 
-        # Step 3: Analyze the cropped data for delta power
-        analysis_results = analyze_delta_power(raw_cropped)
+    # Step 2: Crop the raw data around the seizure, with 60 seconds before and after the event
+    raw_cropped = copy_and_crop(raw_data, seizure_index, seizures_list_table)
 
-        # Step 4: Return the analysis results (or save them, depending on requirements)
-        return analysis_results
+    # Step 3: Analyze the cropped data for delta power
+    analysis_results = analyze_delta_power(raw_cropped)
 
-    # Example usage
-    if __name__ == "__main__":
-        pat_num_list = []
-        for pat in pat_num_list:
-            seizures_list_table = get_seizures_list(pat)
-            seizures_list = seizures_list_table['seizure_num'].tolist()
-            for seizure in seizures_list:
-                results = main(pat, seizure,seizures_list_table)
-                print(results)
+    # Step 4: Return the analysis results (or save them, depending on requirements)
+    return analysis_results
+
+
+if __name__ == "__main__":
+    surf = "surf30"
+    surf_suffix_to_remove = '02'
+    pat_list = list(filter(lambda x: x.startswith("pat_"),os.listdir(DATA_PATH / "raw_data" / surf)))
+    # Remove 'pat_' from each string
+    pat_num_list = [pat.replace('pat_', '') for pat in pat_list]
+    # Removing '02' by slicing off the last two characters
+    pat_num_list = [num[:-2] if num.endswith(surf_suffix_to_remove) else num for num in pat_num_list]
+    for pat in pat_num_list:
+        seizures_list_table = get_seizures_list(pat)
+        seizures_list = seizures_list_table['seizure_num'].tolist()
+        for seizure in seizures_list:
+            results = main_analysis(pat, seizure, seizures_list_table)
+            print(results)
 
     # WHAT'S LEFT: ADD it ALL to a single table
