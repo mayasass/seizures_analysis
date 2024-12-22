@@ -93,18 +93,30 @@ def preprocess_eeg(raw):
 
 def compute_power_spectrum(raw_processed):
     """
-    Compute power spectrum and analyzed frequency bands for each channel.
-    Now returns dictionary with channel-specific power values.
+    Compute power spectrum for multiple frequency bands for each channel.
+    Returns dictionary with channel-specific power values.
     """
+    # Define frequency bands and their names
+    freq_bands = {
+        'low_delta': (0.5, 2),
+        'high_delta': (1, 4),
+        'theta': (4, 8),
+        'alpha': (8, 12),
+        'low_sigma': (11, 13),
+        'high_sigma': (13, 16),
+        'low_beta': (16, 20),
+        'mid_beta': (20, 25),
+        'high_beta': (25, 30),
+        'low_gamma': (30, 35),
+        'high_gamma': (35, 40),
+        'total': (0.5, 40)
+    }
+
     # Get channel names
     channels = raw_processed.ch_names
 
     # Initialize dictionary to store average powers across channels
-    power_results = {
-        'delta_power_0p5_2': 0,
-        'delta_power_1_4': 0,
-        'total_power': 0
-    }
+    power_results = {f"{band}_power": 0 for band in freq_bands.keys()}
 
     # Helper function to get power in specific frequency range
     def get_freq_power(psds, freqs, fmin, fmax):
@@ -125,10 +137,9 @@ def compute_power_spectrum(raw_processed):
         psds = spectrum.get_data()
         freqs = spectrum.freqs
 
-        # Add powers to running sum
-        power_results['delta_power_0p5_2'] += get_freq_power(psds, freqs, 0.5, 2)
-        power_results['delta_power_1_4'] += get_freq_power(psds, freqs, 1, 4)
-        power_results['total_power'] += get_freq_power(psds, freqs, 0.5, 40)
+        # Calculate power for each frequency band
+        for band_name, (fmin, fmax) in freq_bands.items():
+            power_results[f"{band_name}_power"] += get_freq_power(psds, freqs, fmin, fmax)
 
     # Average across channels
     num_channels = len(channels)
@@ -138,9 +149,10 @@ def compute_power_spectrum(raw_processed):
     return power_results
 
 
-def analyze_delta_power(raw, pat_num, seizure_info):
+
+def analyze_spectral_power(raw, pat_num, seizure_info):
     """
-    Analyze delta power and return a single row of results for the seizure.
+    Analyze spectral power across all frequency bands and return a single row of results.
 
     Args:
         raw (mne.io.Raw): Raw EEG data
@@ -153,7 +165,7 @@ def analyze_delta_power(raw, pat_num, seizure_info):
     # 1. Preprocess the data
     raw_processed = preprocess_eeg(raw)
 
-    # 2. Compute power spectrum
+    # 2. Compute power spectrum for all frequency bands
     power_results = compute_power_spectrum(raw_processed)
 
     # 3. Create result dictionary combining seizure info and power analysis
@@ -165,11 +177,11 @@ def analyze_delta_power(raw, pat_num, seizure_info):
         'offset': seizure_info['offset'],
         'vigilance': seizure_info['vigilance'],
         'origin': seizure_info['origin'],
-        'file_seizure_ind': seizure_info['file_seizure_ind'],
-        'low_delta_power': power_results['delta_power_0p5_2'],
-        'high_delta_power': power_results['delta_power_1_4'],
-        'total_power': power_results['total_power']
+        'file_seizure_ind': seizure_info['file_seizure_ind']
     }
+
+    # Add power results
+    result.update(power_results)
 
     return result
 
@@ -177,10 +189,10 @@ def analyze_delta_power(raw, pat_num, seizure_info):
 def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     """""
     Finds the compatible recording for seizure.
-    
+
     Args:
         Patient id and its seizures list table, desired seizure
-    
+
     Returns:
         Raw EEG data of the seizure
      """""
@@ -224,8 +236,6 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     raw = mne.io.read_raw_nicolet(seizure_recording_path, ch_type='eeg', preload=True)
 
     return raw
-
-
 def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_after=60):
     """
     Cut the data +- desired sec to extract the seizure from in the recording
@@ -323,13 +333,18 @@ def main_analysis(pat_num, seizure_index, seizures_list_table, data_path=DATA_PA
     raw_cropped = copy_and_crop(raw_data, seizure_index, seizures_list_table)
 
     # Analyze and return single row of results
-    return analyze_delta_power(raw_cropped, pat_num, seizure_info)
+    return analyze_spectral_power(raw_cropped, pat_num, seizure_info)
 
 
 if __name__ == "__main__":
+    # Define parameters
     surf = "surf30"
     surf_suffix_to_remove = '02'
+
+    # Get list of patient directories
     pat_list = list(filter(lambda x: x.startswith("pat_"), os.listdir(DATA_PATH / "raw_data" / surf)))
+
+    # Process patient numbers
     pat_num_list = [pat.replace('pat_', '') for pat in pat_list]
     pat_num_list = [num[:-2] if num.endswith(surf_suffix_to_remove) else num for num in pat_num_list]
 
@@ -339,12 +354,16 @@ if __name__ == "__main__":
     # Process each patient and seizure
     for pat in pat_num_list:
         print(f"Processing patient {pat}")
+
+        # Get seizures list for current patient
         seizures_list_table = get_seizures_list(pat)
         seizures_list = seizures_list_table['seizure_num'].tolist()
 
+        # Process each seizure for current patient
         for seizure in seizures_list:
             print(f"Processing seizure {seizure}")
             try:
+                # Run analysis for current seizure
                 result = main_analysis(pat, seizure, seizures_list_table)
                 all_results.append(result)
                 print(f"Completed analysis for patient {pat}, seizure {seizure}")
@@ -352,10 +371,10 @@ if __name__ == "__main__":
                 print(f"Error processing patient {pat}, seizure {seizure}: {str(e)}")
                 continue
 
-    # Create final DataFrame and save
+    # Create final DataFrame and save results
     try:
         final_df = pd.DataFrame(all_results)
-        output_path = Path('C:/Users/cognitive/Desktop/all_seizures_analysis.csv')
+        output_path = Path('C:/Users/cognitive/Desktop/all_spectrum_seizures_analysis.csv')
         final_df.to_csv(output_path, index=False)
         print(f"Analysis complete. All results saved to {output_path}")
     except Exception as e:
