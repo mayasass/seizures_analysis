@@ -92,29 +92,27 @@ def preprocess_eeg(raw):
 
 
 def compute_power_spectrum(raw_processed):
-    """""
+    """
     Compute power spectrum and analyzed frequency bands for each channel.
-
-    Args:
-        raw_processed (mne.io.Raw): Preprocessed EEG data
-
-    Returns:
-        pd.DataFrame: Results containing power values for different frequency bands
-    """""
+    Now returns dictionary with channel-specific power values.
+    """
     # Get channel names
     channels = raw_processed.ch_names
 
-    # Initialize lists to store results
-    results = []
+    # Initialize dictionary to store average powers across channels
+    power_results = {
+        'delta_power_0p5_2': 0,
+        'delta_power_1_4': 0,
+        'total_power': 0
+    }
 
     # Helper function to get power in specific frequency range
     def get_freq_power(psds, freqs, fmin, fmax):
         idx = np.logical_and(freqs >= fmin, freqs <= fmax)
         return np.mean(psds[:, idx])
 
-    # Calculate power spectrum for each channel
+    # Calculate power spectrum for each channel and average
     for channel in channels:
-        # Get the spectrum object
         spectrum = raw_processed.compute_psd(
             method='welch',
             picks=channel,
@@ -124,50 +122,57 @@ def compute_power_spectrum(raw_processed):
             n_overlap=int(raw_processed.info['sfreq'] * 2)
         )
 
-        # Get the data from spectrum
         psds = spectrum.get_data()
         freqs = spectrum.freqs
 
-        # Calculate powers for different frequency bands
-        delta_power_0p5_2 = get_freq_power(psds, freqs, 0.5, 2)
-        delta_power_1_4 = get_freq_power(psds, freqs, 1, 4)
-        total_power = get_freq_power(psds, freqs, 0.5, 40)
+        # Add powers to running sum
+        power_results['delta_power_0p5_2'] += get_freq_power(psds, freqs, 0.5, 2)
+        power_results['delta_power_1_4'] += get_freq_power(psds, freqs, 1, 4)
+        power_results['total_power'] += get_freq_power(psds, freqs, 0.5, 40)
 
-        # Store results
-        results.append({
-            'channel': channel,
-            'delta_power_0p5_2': delta_power_0p5_2,
-            'delta_power_1_4': delta_power_1_4,
-            'total_power': total_power
-        })
+    # Average across channels
+    num_channels = len(channels)
+    for key in power_results:
+        power_results[key] /= num_channels
 
-    # Create DataFrame from results
-    df_results = pd.DataFrame(results)
-    return df_results
+    return power_results
 
 
-def analyze_delta_power(raw):
-    """""
-    Main function to analyze delta power in EEG data.
+def analyze_delta_power(raw, pat_num, seizure_info):
+    """
+    Analyze delta power and return a single row of results for the seizure.
 
     Args:
         raw (mne.io.Raw): Raw EEG data
+        pat_num (str): Patient number
+        seizure_info (pd.Series): Row from seizures table with seizure metadata
 
     Returns:
-        pd.DataFrame: Results of power analysis
-    """""
+        dict: Single row of results including patient info and power analysis
+    """
     # 1. Preprocess the data
     raw_processed = preprocess_eeg(raw)
 
-    # 2. Compute power spectrum and analyze
-    df_results = compute_power_spectrum(raw_processed)
+    # 2. Compute power spectrum
+    power_results = compute_power_spectrum(raw_processed)
 
-    # 3. Save results
-    output_path = 'D:/seizures_analysis/excel_files'
-    df_results.to_csv(output_path, index=False)
-    print(f"Analysis complete. Results saved to {output_path}")
+    # 3. Create result dictionary combining seizure info and power analysis
+    result = {
+        'pat_num': pat_num,
+        'seizure_num': seizure_info['seizure_num'],
+        'classif.': seizure_info['classif.'],
+        'onset': seizure_info['onset'],
+        'offset': seizure_info['offset'],
+        'vigilance': seizure_info['vigilance'],
+        'origin': seizure_info['origin'],
+        'file_seizure_ind': seizure_info['file_seizure_ind'],
+        'low_delta_power': power_results['delta_power_0p5_2'],
+        'high_delta_power': power_results['delta_power_1_4'],
+        'total_power': power_results['total_power']
+    }
 
-    return df_results
+    return result
+
 
 def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     """""
@@ -178,7 +183,8 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     
     Returns:
         Raw EEG data of the seizure
-    """""
+     """""
+
     # Base path to data
     data_path = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
 
@@ -219,57 +225,83 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
 
     return raw
 
+
 def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_after=60):
-    """""
-    Cut tha data +- desired sec to extract the seizure from in the recording
-
-    Args:
-        Raw data of recording with a seizure in it, list of seizures' info, seizure index 
-
-    Returns:
-        Raw EEG data crop of the seizure's time +- sec variant (default 60)
-    """""
+    """
+    Cut the data +- desired sec to extract the seizure from in the recording
+    """
     # Create a copy to avoid modifying the original
     raw = raw.copy()
 
-    # Adjusting to original counting method
-    seizure_ind = seizure_ind - 1
+    print("Debug step 1: Getting table index")
+    # Get the row index in the table for this seizure
+    matching_rows = seizures_list_table[seizures_list_table['seizure_num'] == seizure_ind]
+    if matching_rows.empty:
+        print(f"No matching seizure found for index {seizure_ind}")
+        print("Available seizure numbers:", seizures_list_table['seizure_num'].tolist())
+        raise ValueError(f"No seizure found with index {seizure_ind}")
+
+    table_index = matching_rows.index[0]
+    print(f"Found table index: {table_index}")
+
+    print("Debug step 2: Getting recording info")
     # Get recording information in seconds
-    recording_duration = raw.times[-1]  # or: len(raw.times) / raw.info['sfreq']
+    recording_duration = raw.times[-1]
     recording_start = np.datetime64(raw.info['meas_date'])
+    print(f"Recording start time: {recording_start}")
 
-    # Get the start & end time of desired seizure
-    seizure_start = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'onset'], format='ISO8601').to_numpy()
-    seizure_end = pd.to_datetime(seizures_list_table.loc[seizure_ind, 'offset'], format='ISO8601').to_numpy()
+    # Get onset/offset times and print them for debugging
+    print("Debug step 3: Getting onset/offset times")
+    onset_str = seizures_list_table.loc[table_index, 'onset'].strip()
+    offset_str = seizures_list_table.loc[table_index, 'offset'].strip()
+    print(f"Raw onset time string: '{onset_str}'")
+    print(f"Raw offset time string: '{offset_str}'")
 
-    # Ensure both datetime64 values have the same precision (microseconds here)
-    recording_start = recording_start.astype('datetime64[us]')
-    seizure_start = seizure_start.astype('datetime64[us]')
-    seizure_end = seizure_end.astype('datetime64[us]')
+    try:
+        print("Debug step 4: Attempting to parse dates")
+        # Using the exact format that matches your data
+        seizure_start = pd.to_datetime(onset_str, format='%Y-%m-%d %H:%M:%S')
+        print(f"Successfully parsed onset time: {seizure_start}")
 
-    # Subtraction of start and end from recording start to get duration in sec
-    seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
-    seizure_end_from_tmin = (seizure_end - recording_start) / np.timedelta64(1, 's')
+        seizure_end = pd.to_datetime(offset_str, format='%Y-%m-%d %H:%M:%S')
+        print(f"Successfully parsed offset time: {seizure_end}")
 
-    # Calculate crop times in sec (5 minutes before and after (60s))
-    crop_start = seizure_start_from_tmin - sec_before
-    crop_end = seizure_end_from_tmin + sec_after
-    print(crop_start)
-    print(crop_end)
+        # Convert to numpy datetime64 with microsecond precision
+        seizure_start = np.datetime64(seizure_start)
+        seizure_end = np.datetime64(seizure_end)
+        recording_start = recording_start.astype('datetime64[us]')
+        seizure_start = seizure_start.astype('datetime64[us]')
+        seizure_end = seizure_end.astype('datetime64[us]')
 
-    # Make sure we're within recording borders
-    if crop_start < 0:
-        crop_start = 0
-        print('Warning: crop_start adjusted to recording start (0)')
+        # Calculate times in seconds
+        seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
+        seizure_end_from_tmin = (seizure_end - recording_start) / np.timedelta64(1, 's')
 
-    if crop_end > recording_duration:
-        crop_end = recording_duration
-        print(f'Warning: crop_end adjusted to recording end ({recording_duration}s)')
+        print(f"Seizure starts at {seizure_start_from_tmin} seconds from recording start")
+        print(f"Seizure ends at {seizure_end_from_tmin} seconds from recording start")
 
-    # Cropping the data
-    raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
-    # Maybe: raising assert for data exception
-    return raw_cropped
+        # Calculate crop times
+        crop_start = seizure_start_from_tmin - sec_before
+        crop_end = seizure_end_from_tmin + sec_after
+
+        # Make sure we're within recording borders
+        if crop_start < 0:
+            print('Warning: crop_start adjusted to recording start (0)')
+            crop_start = 0
+
+        if crop_end > recording_duration:
+            print(f'Warning: crop_end adjusted to recording end ({recording_duration}s)')
+            crop_end = recording_duration
+
+        # Crop the data
+        raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
+        return raw_cropped
+
+    except Exception as e:
+        print(f"Error occurred while processing times: {str(e)}")
+        print(f"Full row data: {seizures_list_table.loc[table_index]}")
+        print(f"Data types: {seizures_list_table.loc[table_index].dtypes}")
+        raise
 
 def get_seizures_list(pat_num, data_path=DATA_PATH):
     # Load seizures table
@@ -278,34 +310,53 @@ def get_seizures_list(pat_num, data_path=DATA_PATH):
 
     return seizures_list_table
 
-def main_analysis(pat_num, seizure_index, seizures_list_table, data_path = DATA_PATH):
 
-    # Step 1: Find the raw EEG data for the given patient and seizure index
+def main_analysis(pat_num, seizure_index, seizures_list_table, data_path=DATA_PATH):
+    """
+    Process a single seizure and return its analysis results.
+    """
+    # Get seizure info
+    seizure_info = seizures_list_table[seizures_list_table['seizure_num'] == seizure_index].iloc[0]
+
+    # Find and process the raw EEG data
     raw_data = seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table)
-
-    # Step 2: Crop the raw data around the seizure, with 60 seconds before and after the event
     raw_cropped = copy_and_crop(raw_data, seizure_index, seizures_list_table)
 
-    # Step 3: Analyze the cropped data for delta power
-    analysis_results = analyze_delta_power(raw_cropped)
-
-    # Step 4: Return the analysis results (or save them, depending on requirements)
-    return analysis_results
+    # Analyze and return single row of results
+    return analyze_delta_power(raw_cropped, pat_num, seizure_info)
 
 
 if __name__ == "__main__":
     surf = "surf30"
     surf_suffix_to_remove = '02'
-    pat_list = list(filter(lambda x: x.startswith("pat_"),os.listdir(DATA_PATH / "raw_data" / surf)))
-    # Remove 'pat_' from each string
+    pat_list = list(filter(lambda x: x.startswith("pat_"), os.listdir(DATA_PATH / "raw_data" / surf)))
     pat_num_list = [pat.replace('pat_', '') for pat in pat_list]
-    # Removing '02' by slicing off the last two characters
     pat_num_list = [num[:-2] if num.endswith(surf_suffix_to_remove) else num for num in pat_num_list]
+
+    # Initialize list to store all results
+    all_results = []
+
+    # Process each patient and seizure
     for pat in pat_num_list:
+        print(f"Processing patient {pat}")
         seizures_list_table = get_seizures_list(pat)
         seizures_list = seizures_list_table['seizure_num'].tolist()
-        for seizure in seizures_list:
-            results = main_analysis(pat, seizure, seizures_list_table)
-            print(results)
 
-    # WHAT'S LEFT: ADD it ALL to a single table
+        for seizure in seizures_list:
+            print(f"Processing seizure {seizure}")
+            try:
+                result = main_analysis(pat, seizure, seizures_list_table)
+                all_results.append(result)
+                print(f"Completed analysis for patient {pat}, seizure {seizure}")
+            except Exception as e:
+                print(f"Error processing patient {pat}, seizure {seizure}: {str(e)}")
+                continue
+
+    # Create final DataFrame and save
+    try:
+        final_df = pd.DataFrame(all_results)
+        output_path = Path('C:/Users/cognitive/Desktop/all_seizures_analysis.csv')
+        final_df.to_csv(output_path, index=False)
+        print(f"Analysis complete. All results saved to {output_path}")
+    except Exception as e:
+        print(f"Error saving final results: {str(e)}")
