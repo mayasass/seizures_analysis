@@ -12,7 +12,7 @@ from pathlib import Path
 DATA_PATH = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
 
 def fix_electrode_names(raw):
-    """""
+    """
     Rename old electrode names to new standard and keep only the 19 standard electrodes.
 
     Arguments:
@@ -20,7 +20,7 @@ def fix_electrode_names(raw):
 
     Returns: 
     mne.io.Raw: Processed EEG data with correct electrode names
-    """""
+    """
     # Create a copy to avoid modifying the original
     raw_processed = raw.copy()
 
@@ -67,13 +67,13 @@ def fix_electrode_names(raw):
 
 
 def preprocess_eeg(raw):
-    """""
+    """
     Preprocess EEG data with standard pipeline (bandpass and avg reference).
 
     Args: raw (mne.io.Raw): Raw EEG data
 
     Returns: mne.io.Raw: Preprocessed EEG data
-    """""
+    """
     # Create a copy to avoid modifying the original
     raw_processed = raw.copy()
 
@@ -93,10 +93,10 @@ def preprocess_eeg(raw):
 
 def compute_power_spectrum(raw_processed):
     """
-    Compute power spectrum for multiple frequency bands for each channel.
-    Returns dictionary with channel-specific power values.
+    Compute normalized power spectrum for multiple frequency bands for each channel.
+    Returns dictionary with channel-specific relative power values.
     """
-    # Define frequency bands and their names
+    # Define frequency bands and their names (keeping your original bands)
     freq_bands = {
         'low_delta': (0.5, 2),
         'high_delta': (1, 4),
@@ -108,23 +108,21 @@ def compute_power_spectrum(raw_processed):
         'mid_beta': (20, 25),
         'high_beta': (25, 30),
         'low_gamma': (30, 35),
-        'high_gamma': (35, 40),
-        'total': (0.5, 40)
+        'high_gamma': (35, 40)
     }
 
-    # Get channel names
     channels = raw_processed.ch_names
-
-    # Initialize dictionary to store average powers across channels
     power_results = {f"{band}_power": 0 for band in freq_bands.keys()}
 
-    # Helper function to get power in specific frequency range
     def get_freq_power(psds, freqs, fmin, fmax):
         idx = np.logical_and(freqs >= fmin, freqs <= fmax)
         return np.mean(psds[:, idx])
 
-    # Calculate power spectrum for each channel and average
+    # Initialize total channel power
+    channel_count = len(channels)
+
     for channel in channels:
+        # Calculate PSD using Welch's method
         spectrum = raw_processed.compute_psd(
             method='welch',
             picks=channel,
@@ -137,17 +135,25 @@ def compute_power_spectrum(raw_processed):
         psds = spectrum.get_data()
         freqs = spectrum.freqs
 
-        # Calculate power for each frequency band
+        # Calculate total power across entire frequency range (0.5-40 Hz)
+        total_power = get_freq_power(psds, freqs, 0.5, 40)
+
+        # Calculate normalized power for each band
         for band_name, (fmin, fmax) in freq_bands.items():
-            power_results[f"{band_name}_power"] += get_freq_power(psds, freqs, fmin, fmax)
+            band_power = get_freq_power(psds, freqs, fmin, fmax)
+            # Normalize by total power and accumulate for averaging
+            old_value = power_results[f"{band_name}_power"]
+            normalized_power = band_power / total_power
+            power_results[f"{band_name}_power"] = old_value + normalized_power
 
     # Average across channels
-    num_channels = len(channels)
     for key in power_results:
-        power_results[key] /= num_channels
+        power_results[key] /= channel_count
+
+    # Add total absolute power for reference
+    power_results['total_power'] = total_power / channel_count
 
     return power_results
-
 
 
 def analyze_spectral_power(raw, pat_num, seizure_info):
@@ -187,7 +193,7 @@ def analyze_spectral_power(raw, pat_num, seizure_info):
 
 
 def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
-    """""
+    """
     Finds the compatible recording for seizure.
 
     Args:
@@ -195,7 +201,7 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
 
     Returns:
         Raw EEG data of the seizure
-     """""
+     """
 
     # Base path to data
     data_path = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
