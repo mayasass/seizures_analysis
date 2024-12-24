@@ -116,7 +116,7 @@ def compute_power_spectrum(raw_processed):
 
     def get_freq_power(psds, freqs, fmin, fmax):
         idx = np.logical_and(freqs >= fmin, freqs <= fmax)
-        return np.mean(psds[:, idx])
+        return np.sum(psds[:, idx])
 
     # Initialize total channel power
     channel_count = len(channels)
@@ -242,7 +242,7 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table):
     raw = mne.io.read_raw_nicolet(seizure_recording_path, ch_type='eeg', preload=True)
 
     return raw
-def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_after=60):
+def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_after=0):
     """
     Cut the data +- desired sec to extract the seizure from in the recording
     """
@@ -260,11 +260,12 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
     table_index = matching_rows.index[0]
     print(f"Found table index: {table_index}")
 
-    print("Debug step 2: Getting recording info")
-    # Get recording information in seconds
-    recording_duration = raw.times[-1]
+
+    # print("Debug step 2: Getting recording info")
+    # # Get recording information in seconds
+    # recording_duration = raw.times[-1]
     recording_start = np.datetime64(raw.info['meas_date'])
-    print(f"Recording start time: {recording_start}")
+    # print(f"Recording start time: {recording_start}")
 
     # Get onset/offset times and print them for debugging
     print("Debug step 3: Getting onset/offset times")
@@ -279,35 +280,35 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
         seizure_start = pd.to_datetime(onset_str, format='%Y-%m-%d %H:%M:%S')
         print(f"Successfully parsed onset time: {seizure_start}")
 
-        seizure_end = pd.to_datetime(offset_str, format='%Y-%m-%d %H:%M:%S')
-        print(f"Successfully parsed offset time: {seizure_end}")
+        # seizure_end = pd.to_datetime(offset_str, format='%Y-%m-%d %H:%M:%S')
+        # print(f"Successfully parsed offset time: {seizure_end}")
 
         # Convert to numpy datetime64 with microsecond precision
         seizure_start = np.datetime64(seizure_start)
-        seizure_end = np.datetime64(seizure_end)
+        # seizure_end = np.datetime64(seizure_end)
         recording_start = recording_start.astype('datetime64[us]')
         seizure_start = seizure_start.astype('datetime64[us]')
-        seizure_end = seizure_end.astype('datetime64[us]')
+        # seizure_end = seizure_end.astype('datetime64[us]')
 
         # Calculate times in seconds
         seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
-        seizure_end_from_tmin = (seizure_end - recording_start) / np.timedelta64(1, 's')
+        # seizure_end_from_tmin = (seizure_end - recording_start) / np.timedelta64(1, 's')
 
         print(f"Seizure starts at {seizure_start_from_tmin} seconds from recording start")
-        print(f"Seizure ends at {seizure_end_from_tmin} seconds from recording start")
+        # print(f"Seizure ends at {seizure_end_from_tmin} seconds from recording start")
 
         # Calculate crop times
         crop_start = seizure_start_from_tmin - sec_before
-        crop_end = seizure_end_from_tmin + sec_after
+        crop_end = seizure_start_from_tmin
 
         # Make sure we're within recording borders
         if crop_start < 0:
             print('Warning: crop_start adjusted to recording start (0)')
             crop_start = 0
 
-        if crop_end > recording_duration:
-            print(f'Warning: crop_end adjusted to recording end ({recording_duration}s)')
-            crop_end = recording_duration
+        # if crop_end > recording_duration:
+        #     print(f'Warning: crop_end adjusted to recording end ({recording_duration}s)')
+        #     crop_end = recording_duration
 
         # Crop the data
         raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
@@ -380,7 +381,8 @@ if __name__ == "__main__":
     # Create final DataFrame and save results
     try:
         final_df = pd.DataFrame(all_results)
-        output_path = Path('C:/Users/cognitive/Desktop/all_spectrum_seizures_analysis.csv')
+        os.makedirs('D:/seizures_analysis/output/', exist_ok=True)
+        output_path = Path('D:/seizures_analysis/output/all_spectrum_seizures_analysis_v2.csv')
         final_df.to_csv(output_path, index=False)
         print(f"Analysis complete. All results saved to {output_path}")
     except Exception as e:
