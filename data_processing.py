@@ -395,7 +395,7 @@ if __name__ == "__main__":
 
     all_results = []
 
-    for surf in surf_list[:1]:
+    for surf in surf_list:
         print(f"\nProcessing hospital: {surf}")
         try:
             surf_suffix = surf_suffix_mapping.get(surf, "")
