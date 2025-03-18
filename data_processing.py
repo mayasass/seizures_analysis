@@ -415,7 +415,7 @@ if __name__ == "__main__":
         os.makedirs('D:/seizures_analysis/output/', exist_ok=True)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = Path(f'D:/seizures_analysis/output/all_spectrum_all_host_seizures_analysis_{timestamp}.csv')
+        output_path = Path(f'D:/seizures_analysis/output/all_electrodes_all_host_seizures_analysis_{timestamp}.csv')
 
         # Get actual columns from the DataFrame
         available_columns = final_df.columns.tolist()
