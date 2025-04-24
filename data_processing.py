@@ -129,47 +129,64 @@ def compute_power_spectrum(raw_processed):
         return float(np.sum(psd[:, idx]))  # Convert to float
 
     for channel in channels:
-        spectrum = raw_processed.compute_psd(
-            method='welch',
-            picks=channel,
-            fmin=0.5,
-            fmax=40,
-            n_fft=int(raw_processed.info['sfreq'] * 4),
-            n_overlap=int(raw_processed.info['sfreq'] * 2)
-        )
+        # Calculate appropriate n_fft - must be <= signal length
+        signal_length = len(raw_processed.times)
+        # Use a power of 2 for better performance, but no larger than signal length
+        n_fft = min(signal_length, 2 ** int(np.log2(signal_length)))
+        n_overlap = n_fft // 2  # 50% overlap
 
-        psd = spectrum.get_data()
-        freqs = spectrum.freqs
+        print(f"Channel {channel}: signal length = {signal_length}, using n_fft = {n_fft}, n_overlap = {n_overlap}")
 
-        # Get total power and ensure it's a scalar
-        total_power = get_freq_power(psd, freqs, 0.5, 40)
+        try:
+            spectrum = raw_processed.compute_psd(
+                method='welch',
+                picks=channel,
+                fmin=0.5,
+                fmax=40,
+                n_fft=n_fft,
+                n_overlap=n_overlap
+            )
 
-        # Store results for each channel-band combination
-        for band_name, (fmin, fmax) in freq_bands.items():
-            band_power = get_freq_power(psd, freqs, fmin, fmax)
-            normalized_power = band_power / total_power if total_power > 0 else 0
-            power_results[f"{channel}_{band_name}"] = normalized_power  # No need for [0]
+            psd = spectrum.get_data()
+            freqs = spectrum.freqs
 
-        # Store total power for each channel (multiplied by 10^6)
-        power_results[f"{channel}_total_power"] = total_power
+            # Get total power and ensure it's a scalar
+            total_power = get_freq_power(psd, freqs, 0.5, 40)
+
+            # Store results for each channel-band combination
+            for band_name, (fmin, fmax) in freq_bands.items():
+                band_power = get_freq_power(psd, freqs, fmin, fmax)
+                normalized_power = band_power / total_power if total_power > 0 else 0
+                power_results[f"{channel}_{band_name}"] = normalized_power
+
+            # Store total power for each channel (multiplied by 10^6)
+            power_results[f"{channel}_total_power"] = total_power
+
+        except Exception as e:
+            print(f"Error computing spectrum for channel {channel}: {str(e)}")
+            # Set default values for this channel
+            for band_name in freq_bands:
+                power_results[f"{channel}_{band_name}"] = 0
+            power_results[f"{channel}_total_power"] = 0
 
     # Calculate total brain power for control
-    total_brain_power = sum(power_results[f"{ch}_total_power"] for ch in channels)
+    total_brain_power = sum(power_results.get(f"{ch}_total_power", 0) for ch in channels)
     power_results['total_brain_power'] = total_brain_power
 
     # Calculate delta/gamma, delta/sigma, sigma/beta ratios
     for channel in channels:
-        delta_power = power_results[f"{channel}_delta"]
-        sigma_power = power_results[f"{channel}_sigma"]
-        beta_power = power_results[f"{channel}_beta"]
-        gamma_power = power_results[f"{channel}_gamma"]
+        delta_power = power_results.get(f"{channel}_delta", 0)
+        sigma_power = power_results.get(f"{channel}_sigma", 0)
+        beta_power = power_results.get(f"{channel}_beta", 0)
+        gamma_power = power_results.get(f"{channel}_gamma", 0)
+
         delta_gamma_ratio = delta_power / gamma_power if gamma_power > 0 else 0
-        delta_sigma_ratio = delta_power / sigma_power if gamma_power > 0 else 0
-        sigma_beta_ratio = delta_power / beta_power if gamma_power > 0 else 0
+        delta_sigma_ratio = delta_power / sigma_power if sigma_power > 0 else 0
+        sigma_beta_ratio = sigma_power / beta_power if beta_power > 0 else 0
+
         power_results[f"{channel}_delta_gamma_ratio"] = delta_gamma_ratio
-        power_results[f"{channel}_delta_sigma_ratio"] = delta_gamma_ratio
-        power_results[f"{channel}_sigma_beta_ratio"] = delta_gamma_ratio
-    
+        power_results[f"{channel}_delta_sigma_ratio"] = delta_sigma_ratio
+        power_results[f"{channel}_sigma_beta_ratio"] = sigma_beta_ratio
 
     return power_results
 
@@ -235,7 +252,7 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
     """
     global adjusted_crop_count
     raw = raw.copy()
-    
+
     print("Getting table index")
     matching_rows = seizures_list_table[seizures_list_table['seizure_num'] == seizure_ind]
     if matching_rows.empty:
@@ -258,20 +275,38 @@ def copy_and_crop(raw, seizure_ind, seizures_list_table, sec_before=60, sec_afte
     seizure_start_from_tmin = (seizure_start - recording_start) / np.timedelta64(1, 's')
     print(f"Seizure starts at {seizure_start_from_tmin} seconds from recording start")
 
-    crop_start = seizure_start_from_tmin - sec_before
-    crop_end = seizure_start_from_tmin
-
-    if crop_start < 0:
-        print(f"⚠️ crop_start ({crop_start:.2f}) < 0, adjusting to 0")
-        crop_start = 0
-        adjusted_crop_count += 1
-
     max_time = raw.times[-1]
-    if crop_end > max_time:
-        print(f"⚠️ crop_end ({crop_end:.2f}) > recording duration ({max_time:.2f}), adjusting.")
+
+    # Critical check: is seizure start even in the recording?
+    if seizure_start_from_tmin > max_time:
+        print(f"ERROR: Seizure start ({seizure_start_from_tmin:.2f}s) is beyond recording duration ({max_time:.2f}s)")
+        print(f"Using last {sec_before} seconds of recording instead")
+        crop_start = max(0, max_time - sec_before)
         crop_end = max_time
         adjusted_crop_count += 1
+    else:
+        # Normal case - seizure is within recording
+        crop_start = seizure_start_from_tmin - sec_before
+        crop_end = seizure_start_from_tmin + sec_after
 
+        # Safety checks
+        if crop_start < 0:
+            print(f"crop_start ({crop_start:.2f}) < 0, adjusting to 0")
+            crop_start = 0
+            adjusted_crop_count += 1
+
+        if crop_end > max_time:
+            print(f"crop_end ({crop_end:.2f}) > recording duration ({max_time:.2f}), adjusting.")
+            crop_end = max_time
+            adjusted_crop_count += 1
+
+    # Final safety check to ensure tmin < tmax
+    if crop_start >= crop_end:
+        print(f"WARNING: crop_start ({crop_start:.2f}) >= crop_end ({crop_end:.2f}), adjusting")
+        crop_start = max(0, crop_end - 1)  # Take at least 1 second if possible
+        adjusted_crop_count += 1
+
+    print(f"Cropping from {crop_start:.2f}s to {crop_end:.2f}s")
     raw_cropped = raw.copy().crop(tmin=crop_start, tmax=crop_end)
     return raw_cropped
 
@@ -325,7 +360,7 @@ def main_analysis(base_pat_num, full_pat_num, seizure_index, seizures_list_table
 
 def process_hospital(surf, surf_suffix_to_remove, data_path):
     """Process all patients and seizures for a single hospital."""
-  
+
     hospital_path = data_path / "raw_data" / surf
     print(f"Checking hospital path: {hospital_path}")
 
@@ -333,7 +368,7 @@ def process_hospital(surf, surf_suffix_to_remove, data_path):
         raise FileNotFoundError(f"Hospital directory not found: {hospital_path}")
 
     pat_list = list(filter(lambda x: x.startswith("pat_"),
-                            os.listdir(hospital_path)))
+                           os.listdir(hospital_path)))
 
     pat_num_list = [pat.replace('pat_', '') for pat in pat_list]
 
@@ -345,18 +380,45 @@ def process_hospital(surf, surf_suffix_to_remove, data_path):
         base_pat_num, full_pat_num = get_pat_info(pat, surf)
 
         # Use base_pat_num for getting seizures list
+        seizure_table_path = DATA_PATH / "tables" / "seizure_tables" / f"{base_pat_num}_{surf}_seizures.csv"
+        if not seizure_table_path.exists():
+            print(f"Seizures list file not found for patient {pat}. Skipping.")
+            continue
+
         seizures_list_table = get_seizures_list(base_pat_num, surf)
         seizures_list = seizures_list_table['seizure_num'].tolist()
 
         for seizure in seizures_list:
             print(f"Processing seizure {seizure}")
+
+            # Check if file_seizure_ind exists and is valid
+            matching_seizures = seizures_list_table[seizures_list_table['seizure_num'] == seizure]
+            if matching_seizures.empty:
+                print(f"No data found for seizure {seizure}. Skipping.")
+                continue
+
+            seizure_rec_num = matching_seizures['file_seizure_ind'].iloc[0]
+
+            # Check if the file list exists
+            file_list_path = DATA_PATH / "tables" / "pat_file_tables" / f"pat_{base_pat_num}_{surf}_file_list.csv"
+            if not file_list_path.exists():
+                print(f"File list not found for patient {pat}. Skipping seizure {seizure}.")
+                continue
+
+            # Read the file list
+            seizures_data_table = pd.read_csv(file_list_path)
+
+            # Check if the index is valid
+            if seizure_rec_num < 0 or seizure_rec_num >= len(seizures_data_table):
+                print(
+                    f"Record number {seizure_rec_num} is out of range (0-{len(seizures_data_table) - 1}). Skipping seizure {seizure}.")
+                continue
+
+            # If we get here, we should be able to process this seizure
             result = main_analysis(base_pat_num, full_pat_num, seizure, seizures_list_table, surf)
             result['hospital'] = surf
             hospital_results.append(result)
-            print(
-                f"Completed analysis for patient {full_pat_num} (base: {base_pat_num}), seizure {seizure}")
-
-
+            print(f"Completed analysis for patient {full_pat_num} (base: {base_pat_num}), seizure {seizure}")
 
     return hospital_results
 
