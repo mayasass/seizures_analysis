@@ -13,6 +13,99 @@ from pathlib import Path
 DATA_PATH = Path("E:/Ben Gurion University Of Negev Dropbox/CPL lab members/epilepsy_data/Epilepsiea")
 adjusted_crop_count = 0
 
+
+def extract_patient_number(code_string):
+    """
+    Extracts the base patient number from codes like "30002 (FR_300)" -> "300"
+    or "1322803 (PA_surf_13228)" -> "13228"
+    """
+    # Find the content inside parentheses
+    start_paren = code_string.find('(')
+    end_paren = code_string.find(')')
+
+    if start_paren != -1 and end_paren != -1:
+        # Extract the content inside parentheses
+        inside_parens = code_string[start_paren + 1:end_paren]
+
+        # Extract the number after the underscore
+        parts = inside_parens.split('_')
+        if len(parts) >= 2:
+            # Get the last part which should contain the number
+            number_part = parts[-1]
+
+            # Remove any non-numeric prefix (like "surf")
+            number_part = ''.join(c for c in number_part if c.isdigit())
+            return number_part
+
+    # If we couldn't extract a number, return None
+    return None
+
+
+def load_etiology_data(etiology_path):
+    """
+    Load the etiology data and create a mapping of patient numbers to localization info.
+    """
+    import pandas as pd
+    import numpy as np
+
+    # Load the etiology data
+    etiology_df = pd.read_csv(etiology_path)
+
+    # Create a mapping of patient numbers to localization info
+    localization_map = {}
+
+    for _, row in etiology_df.iterrows():
+        # Extract the patient number from the code column
+        if 'code' not in row or pd.isna(row['code']):
+            continue
+
+        code_string = str(row['code'])  # Convert to string to handle any numeric codes
+        pat_num = extract_patient_number(code_string)
+
+        if pat_num and 'localisation' in row:
+            # Check if localization is NaN or None
+            if pd.isna(row['localisation']):
+                # Skip this row or use default values
+                continue
+
+            # Convert to string to be safe
+            loc_str = str(row['localisation'])
+
+            # Split the localization column by commas
+            loc_parts = loc_str.split(',')
+
+            if len(loc_parts) >= 3:
+                lobe = loc_parts[0].strip()
+                side = loc_parts[2].strip()
+
+                # Store the localization info for this patient
+                localization_map[pat_num] = {
+                    'lobe': lobe,
+                    'side': side
+                }
+
+    return localization_map
+
+
+def enrich_patient_data(result, localization_map, base_pat_num):
+    """
+    Add localization data to a patient's results.
+    """
+    print(f"Adding localization data for patient {base_pat_num}")
+    # Default values in case no matching data is found
+    lobe = "unknown"
+    side = "unknown"
+
+    # Try to find localization data for this patient
+    if base_pat_num in localization_map:
+        lobe = localization_map[base_pat_num]['lobe']
+        side = localization_map[base_pat_num]['side']
+
+    # Add the localization info to the result
+    result['lobe'] = lobe
+    result['side'] = side
+
+    return result
 def get_pat_info(pat_num, surf):
     """Get original patient number with suffix"""
     suffix_mapping = {
@@ -350,15 +443,21 @@ def analyze_spectral_power(raw, base_pat_num, full_pat_num, seizure_info):
     return result
 
 
-def main_analysis(base_pat_num, full_pat_num, seizure_index, seizures_list_table, surf, data_path=DATA_PATH):
+def main_analysis(base_pat_num, full_pat_num, seizure_index, seizures_list_table, surf, localization_map=None):
     """Process a single seizure and return its analysis results."""
     seizure_info = seizures_list_table[seizures_list_table['seizure_num'] == seizure_index].iloc[0]
     raw_data = seizure_num_to_raw_data(base_pat_num, seizure_index, seizures_list_table, surf)
     raw_cropped = copy_and_crop(raw_data, seizure_index, seizures_list_table)
-    return analyze_spectral_power(raw_cropped, base_pat_num, full_pat_num, seizure_info)
+    result = analyze_spectral_power(raw_cropped, base_pat_num, full_pat_num, seizure_info)
+
+    # Add localization data if available
+    if localization_map is not None:
+        result = enrich_patient_data(result, localization_map, base_pat_num)
+
+    return result
 
 
-def process_hospital(surf, surf_suffix_to_remove, data_path):
+def process_hospital(surf, surf_suffix_to_remove, data_path, localization_map=None):
     """Process all patients and seizures for a single hospital."""
 
     hospital_path = data_path / "raw_data" / surf
@@ -415,12 +514,13 @@ def process_hospital(surf, surf_suffix_to_remove, data_path):
                 continue
 
             # If we get here, we should be able to process this seizure
-            result = main_analysis(base_pat_num, full_pat_num, seizure, seizures_list_table, surf)
+            result = main_analysis(base_pat_num, full_pat_num, seizure, seizures_list_table, surf, localization_map)
             result['hospital'] = surf
             hospital_results.append(result)
             print(f"Completed analysis for patient {full_pat_num} (base: {base_pat_num}), seizure {seizure}")
 
     return hospital_results
+
 
 if __name__ == "__main__":
     # Define parameters
@@ -432,45 +532,58 @@ if __name__ == "__main__":
         "CO": "00"
     }
 
+    # Load etiology data for localization information
+    etiology_path = DATA_PATH / "tables" / "etiology.csv"
+    localization_map = None
+
+    if etiology_path.exists():
+        print(f"Loading etiology data from {etiology_path}")
+        localization_map = load_etiology_data(etiology_path)
+        print(f"Loaded localization data for {len(localization_map)} patients")
+    else:
+        print(f"Etiology file not found at {etiology_path}, proceeding without localization data")
+
     all_results = []
 
     for surf in surf_list:
         print(f"\nProcessing hospital: {surf}")
         surf_suffix = surf_suffix_mapping.get(surf, "")
-        hospital_results = process_hospital(surf, surf_suffix, DATA_PATH)
+        hospital_results = process_hospital(surf, surf_suffix, DATA_PATH, localization_map)
         if hospital_results:  # Only extend if we got results
             all_results.extend(hospital_results)
 
-        if not all_results:
-            print("No results were collected. Check the error messages above.")
-            sys.exit(1)
+    if not all_results:
+        print("No results were collected. Check the error messages above.")
+        sys.exit(1)
 
-        final_df = pd.DataFrame(all_results)
-        os.makedirs('D:/seizures_analysis/output/', exist_ok=True)
+    final_df = pd.DataFrame(all_results)
+    os.makedirs('D:/seizures_analysis/output/', exist_ok=True)
 
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = Path(f'D:/seizures_analysis/output/all_electrodes_all_host_seizures_analysis_{timestamp}.csv')
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_path = Path(f'D:/seizures_analysis/output/all_electrodes_all_host_seizures_analysis_{timestamp}.csv')
 
-        # Get actual columns from the DataFrame
-        available_columns = final_df.columns.tolist()
+    # Get actual columns from the DataFrame
+    available_columns = final_df.columns.tolist()
 
-        # Define preferred order for known columns
-        preferred_columns = [
-            'hospital',
-            'pat_num',
-            'base_pat_num',
-            'seizure_num',
-            'classif.',
-            'vigilance',
-            'vigilance_code',
-            'origin',
-            'origin_code',
-            'onset',
-            'offset',
-            'file_seizure_ind',
-            'total_brain_power'
-        ]
-
+    # Define preferred order for known columns
+    preferred_columns = [
+        'hospital',
+        'pat_num',
+        'base_pat_num',
+        'seizure_num',
+        'classif.',
+        'vigilance',
+        'vigilance_code',
+        'origin',
+        'origin_code',
+        'lobe',  # New column from etiology data
+        'side',  # New column from etiology data
+        'onset',
+        'offset',
+        'file_seizure_ind',
+        'total_brain_power'
+    ]
+    print("Columns in DataFrame before reordering:", final_df.columns.tolist())
     # Create actual column order using available columns
     column_order = [col for col in preferred_columns if col in available_columns]
 
