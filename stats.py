@@ -9,14 +9,15 @@ from scipy import stats
 from statsmodels.genmod.bayes_mixed_glm import BinomialBayesMixedGLM
 
 # --- Load and preprocess data ---
-df = pd.read_csv('D:/seizures_analysis/output/clean_final_table.csv')
+# df = pd.read_csv('D:/seizures_analysis/output/clean_final_table.csv')
+df = pd.read_csv('/Users/maya/Documents/lab_project/data/clean_final_table.csv')
 
 # Recode vigilance stages
 vig_map = {
-    'sleep stage I': 'light NREM',
-    'sleep stage II': 'light NREM',
-    'sleep stage III': 'deep NREM',
-    'sleep stage IV': 'deep NREM'
+    'sleep stage I': 'NREM 1',
+    'sleep stage II': 'NREM 2',
+    'sleep stage III': 'NREM 3',
+    'sleep stage IV': 'NREM 3'
 }
 df['vigilance_recode'] = df['vigilance'].replace(vig_map)
 df = df[df['vigilance_recode'] != 'unclear'].copy()
@@ -41,7 +42,7 @@ df['log_PZ_delta_gamma_ratio_z'] = (
 # --- Model formula (with interaction) ---
 formula = ('FBTCS_code ~ log_PZ_delta_gamma_ratio_z * '
            'C(vigilance_recode, Treatment(reference="awake")) '
-           '+ C(lobe_recode, Treatment(reference="other"))')  # C(...) for “categorical”
+           '+ C(lobe_recode, Treatment(reference="temporal"))')  # C(...) for “categorical”
 
 # dependent variable, independent variables
 endog, exog = dmatrices(formula, data=df, return_type='dataframe')
@@ -58,12 +59,14 @@ result = model.fit_vb(verbose=False)
 
 # --- Summary Table ---
 coef_df = pd.DataFrame({
+    'name': result.model.exog_names,
     'β': result.fe_mean,
     'SD': result.fe_sd,
     'OR': np.exp(result.fe_mean),
     'z': result.fe_mean / result.fe_sd,
     'p': 2 * (1 - stats.norm.cdf(np.abs(result.fe_mean / result.fe_sd)))
 }).round(4)
+coef_df.to_csv("test2.csv")
 print(coef_df)
 
 # --- Forest Plot ---
@@ -80,6 +83,7 @@ OR_l = np.exp(beta - 1.96 * se)
 OR_u = np.exp(beta + 1.96 * se)
 y = np.arange(len(names))
 
+
 plt.figure(figsize=(10, 6))
 plt.hlines(y, OR_l, OR_u)
 plt.plot(OR, y, 'o')
@@ -92,7 +96,7 @@ plt.show()
 
 # --- Predicted Probabilities vs Δ/γ by Vigilance ---
 x_grid = np.linspace(-2.5, 2.5, 100)
-vig_levels = ['awake', 'light NREM', 'deep NREM']
+vig_levels = ['awake', 'NREM 1', 'NREM 2', 'NREM 3']
 plt.figure()
 
 for v in vig_levels:
@@ -119,7 +123,7 @@ for v in vig_levels:
 
     plt.plot(x_grid, probs, label=v)
 
-plt.axhline(0.5, linestyle=':')
+# plt.axhline(0.5, linestyle=':')
 plt.xlabel('log_PZ_delta_gamma_ratio_z')
 plt.ylabel('P(Generalization)')
 plt.title('Predicted Probability by Vigilance State')
@@ -127,7 +131,7 @@ plt.legend()
 plt.tight_layout()
 plt.show()
 
-#--------------- bug fix required
+#--------------- coeffcient plot
 import seaborn as sns
 import matplotlib.pyplot as plt
 
@@ -159,3 +163,4 @@ plt.xlabel("Coefficient (β)")
 plt.title("Coefficient Plot with 95% Confidence Intervals")
 plt.tight_layout(pad=2.5)  # Increase padding
 plt.show()
+print("bye")
