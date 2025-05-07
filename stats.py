@@ -80,14 +80,14 @@ OR_l = np.exp(beta - 1.96 * se)
 OR_u = np.exp(beta + 1.96 * se)
 y = np.arange(len(names))
 
-plt.figure()
+plt.figure(figsize=(10, 6))
 plt.hlines(y, OR_l, OR_u)
 plt.plot(OR, y, 'o')
 plt.axvline(1, linestyle='--')
 plt.yticks(y, names)
 plt.xlabel('Odds ratio (95% CI)')
 plt.title('Forest Plot of Fixed Effects')
-plt.tight_layout()
+plt.tight_layout(pad=1.5)
 plt.show()
 
 # --- Predicted Probabilities vs Δ/γ by Vigilance ---
@@ -131,27 +131,31 @@ plt.show()
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-coef_df = result.summary().tables[0].data[1:]  # skip header
-coef_df = pd.DataFrame(coef_df, columns=result.summary().tables[0].data[0])
-coef_df["Coef."] = coef_df["Coef."].astype(float)
-coef_df["[0.025"] = coef_df["[0.025"].astype(float)
-coef_df["0.975]"] = coef_df["0.975]"].astype(float)
+# Get fixed effect names
+variable_names = result.model.exog_names
+posterior_means = result.fe_mean
+posterior_sds = result.fe_sd
 
-plt.figure(figsize=(8, 6))
-sns.pointplot(
-    y=coef_df[""],
-    x=coef_df["Coef."],
-    join=False,
-    color="black",
-    errwidth=1,
-    capsize=0.1
-)
-for i, row in coef_df.iterrows():
-    plt.plot([row["[0.025"], row["0.975]"]], [i, i], color='gray', lw=2)
+print(f"Lengths - names: {len(variable_names)}, means: {len(posterior_means)}, sds: {len(posterior_sds)}")
 
-plt.axvline(0, color='red', linestyle='--')
-plt.title("Fixed Effects Estimates with 95% CI")
-plt.xlabel("Coefficient (log-odds)")
-plt.ylabel("Predictor")
-plt.tight_layout()
+# Create DataFrame
+coef_df = pd.DataFrame({
+    'Variable': variable_names,
+    'β': posterior_means,
+    'SD': posterior_sds
+})
+coef_df['Lower 95% CI'] = coef_df['β'] - 1.96 * coef_df['SD']
+coef_df['Upper 95% CI'] = coef_df['β'] + 1.96 * coef_df['SD']
+
+# Sort variables for cleaner display
+coef_df = coef_df.sort_values(by='β')
+
+# Increase figure size to fix tight layout issue
+plt.figure(figsize=(10, len(coef_df) * 0.75))
+plt.errorbar(coef_df['β'], coef_df['Variable'],
+             xerr=1.96 * coef_df['SD'], fmt='o', color='black', ecolor='gray', capsize=4)
+plt.axvline(x=0, linestyle='--', color='red')
+plt.xlabel("Coefficient (β)")
+plt.title("Coefficient Plot with 95% Confidence Intervals")
+plt.tight_layout(pad=2.5)  # Increase padding
 plt.show()
