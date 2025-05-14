@@ -4,7 +4,7 @@ import seaborn as sns
 from pathlib import Path
 import numpy as np
 
-preictal_bands = pd.read_csv('D:/seizures_analysis/output/all_spectrum_seizures_analysis_v2.csv')
+preictal_bands = pd.read_csv('D:/seizures_analysis/output/all_spectrum_seizures_analysis_v2.csv_tests')
 
 figure,ax = plt.subplots(1,1, figsize=(15, 5))
 
@@ -12,7 +12,7 @@ sns.violinplot(preictal_bands, x="classif.", y="low_delta_power",hue="vigilance"
 
 figure.savefig('D:/seizures_analysis/output/low_delta_power_vio.svg')
 
-temporal_delta_gamma = pd.read_csv('D:\seizures_analysis\output\lobe_analysis\spectrum_analysis_temporal_20241226_133945.csv')
+temporal_delta_gamma = pd.read_csv('D:\seizures_analysis\output\lobe_analysis\spectrum_analysis_temporal_20241226_133945.csv_tests')
 temporal_delta_gamma = temporal_delta_gamma[temporal_delta_gamma['vigilance'] != 'unclear']
 
 fig,axes = plt.subplots(3,1, figsize=(15, 15))

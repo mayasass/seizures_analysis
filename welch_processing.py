@@ -160,7 +160,7 @@ def analyze_delta_power(raw):
     df_results = compute_power_spectrum(raw_processed)
 
     # 3. Save results
-    output_path = '/Users/maya/Documents/backup_lab_project/exel_files/delta_power_analysis.csv'
+    output_path = '/Users/maya/Documents/backup_lab_project/exel_files/delta_power_analysis.csv_tests'
     df_results.to_csv(output_path, index=False)
     print(f"Analysis complete. Results saved to {output_path}")
 

@@ -7,8 +7,8 @@ mpl.use('Qt5Agg')
 from datetime import datetime, timedelta
 
 # 1) Load data to dataframes
-seizures_data = pd.read_csv('/Users/maya/Documents/backup lab project/data/1_surf30_seizures.csv')
-big_data = pd.read_csv('/Users/maya/Documents/backup lab project/data/pat_1_surf30_file_list.csv')
+seizures_data = pd.read_csv('/Users/maya/Documents/backup lab project/data/1_surf30_seizures.csv_tests')
+big_data = pd.read_csv('/Users/maya/Documents/backup lab project/data/pat_1_surf30_file_list.csv_tests')
 
 # 2) Load EEG file (using MNE nicolet reader) and get the total recording start time
 raw = mne.io.read_raw_nicolet('/Users/maya/Documents/backup lab project/data/100102_0075.data',ch_type='eeg', preload=True)

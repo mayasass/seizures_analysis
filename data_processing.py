@@ -288,7 +288,7 @@ def get_seizures_list(pat_num, surf, data_path=DATA_PATH):
     """
     Load seizures table for a specific patient and hospital.
     """
-    seizures_list_path = data_path / "tables" / "seizure_tables" / f"{pat_num}_{surf}_seizures.csv"
+    seizures_list_path = data_path / "tables" / "seizure_tables" / f"{pat_num}_{surf}_seizures.csv_tests"
     print(f"Attempting to load seizures list from: {seizures_list_path}")
 
     if not seizures_list_path.exists():
@@ -308,7 +308,7 @@ def seizure_num_to_raw_data(pat_num, seizure_index, seizures_list_table, surf):
         'file_seizure_ind'].iloc[0]
 
     # Load the recordings data table using hospital-specific path
-    seizures_data_path = DATA_PATH / "tables" / "pat_file_tables" / f"pat_{pat_num}_{surf}_file_list.csv"
+    seizures_data_path = DATA_PATH / "tables" / "pat_file_tables" / f"pat_{pat_num}_{surf}_file_list.csv_tests"
     print(f"Looking for file list at: {seizures_data_path}")
 
     if not seizures_data_path.exists():
@@ -479,7 +479,7 @@ def process_hospital(surf, surf_suffix_to_remove, data_path, localization_map=No
         base_pat_num, full_pat_num = get_pat_info(pat, surf)
 
         # Use base_pat_num for getting seizures list
-        seizure_table_path = DATA_PATH / "tables" / "seizure_tables" / f"{base_pat_num}_{surf}_seizures.csv"
+        seizure_table_path = DATA_PATH / "tables" / "seizure_tables" / f"{base_pat_num}_{surf}_seizures.csv_tests"
         if not seizure_table_path.exists():
             print(f"Seizures list file not found for patient {pat}. Skipping.")
             continue
@@ -499,7 +499,7 @@ def process_hospital(surf, surf_suffix_to_remove, data_path, localization_map=No
             seizure_rec_num = matching_seizures['file_seizure_ind'].iloc[0]
 
             # Check if the file list exists
-            file_list_path = DATA_PATH / "tables" / "pat_file_tables" / f"pat_{base_pat_num}_{surf}_file_list.csv"
+            file_list_path = DATA_PATH / "tables" / "pat_file_tables" / f"pat_{base_pat_num}_{surf}_file_list.csv_tests"
             if not file_list_path.exists():
                 print(f"File list not found for patient {pat}. Skipping seizure {seizure}.")
                 continue
@@ -533,7 +533,7 @@ if __name__ == "__main__":
     }
 
     # Load etiology data for localization information
-    etiology_path = DATA_PATH / "tables" / "etiology.csv"
+    etiology_path = DATA_PATH / "tables" / "etiology.csv_tests"
     localization_map = None
 
     if etiology_path.exists():
@@ -560,7 +560,7 @@ if __name__ == "__main__":
     os.makedirs('D:/seizures_analysis/output/', exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    output_path = Path(f'D:/seizures_analysis/output/all_electrodes_all_host_seizures_analysis_{timestamp}.csv')
+    output_path = Path(f'D:/seizures_analysis/output/all_electrodes_all_host_seizures_analysis_{timestamp}.csv_tests')
 
     # Get actual columns from the DataFrame
     available_columns = final_df.columns.tolist()
