@@ -1,6 +1,21 @@
-/.idea/misc.xml
-/.idea/modules.xml
-/.idea/inspectionProfiles/profiles_settings.xml
-/.idea/seizures_analysis.iml
-/.idea/vcs.xml
-/output
+# Python / editor
+__pycache__/
+*.pyc
+.idea/
+.DS_Store
+.ipynb_checkpoints/
+
+# Data and results (patient-derived; EPILEPSIAE data may not be shared)
+*.csv
+*.csv_tests
+csv_analysis_files/
+csv_tests/
+
+# Generated outputs (re-created by run_all.py)
+results/
+figures/
+run_logs/
+old_outputs/
+fig*.png
+fig*.svg
+plots/
